@@ -1,13 +1,5 @@
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-
-function signToken(user) {
-  const payload = { id: user._id, username: user.username, role: user.role };
-  const secret = process.env.JWT_SECRET || 'dev_secret';
-  const expiresIn = '7d';
-  return jwt.sign(payload, secret, { expiresIn });
-}
 
 export async function register(req, res) {
   const { username, email, password, role, name } = req.body;
@@ -42,16 +34,8 @@ export async function register(req, res) {
       name,
     });
 
-    const token = signToken(user);
-
-    res
-      .cookie('token', token, {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      })
-      .json({ user: user.toPublicJSON(), token });
+    req.session.user = { id: user._id, username: user.username, role: user.role };
+    res.json({ user: user.toPublicJSON() });
   } catch (error) {
     res.status(500).json({ error: 'An unexpected error occurred' });
   }
@@ -78,27 +62,26 @@ export async function login(req, res) {
       return res.status(400).json({ error: 'Invalid credentials' });
     }
 
-    const token = signToken(user);
-    res
-      .cookie('token', token, {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      })
-      .json({ user: user.toPublicJSON(), token });
+    req.session.user = { id: user._id, username: user.username, role: user.role };
+    res.json({ user: user.toPublicJSON() });
   } catch (error) {
     res.status(500).json({ error: 'An unexpected error occurred' });
   }
 }
 
 export async function logout(req, res) {
-  res.clearCookie('token').json({ ok: true });
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to log out' });
+    }
+    res.clearCookie('connect.sid');
+    res.json({ ok: true });
+  });
 }
 
 export async function me(req, res) {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(req.session.user.id);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -111,7 +94,7 @@ export async function me(req, res) {
 export async function updateMe(req, res) {
   try {
     const { name, bio } = req.body;
-    const user = await User.findByIdAndUpdate(req.user.id, { name, bio }, { new: true });
+    const user = await User.findByIdAndUpdate(req.session.user.id, { name, bio }, { new: true });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
